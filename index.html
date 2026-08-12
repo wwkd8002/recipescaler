@@ -1603,6 +1603,55 @@ function currentRecipeData(){
   };
 }
 
+// ★ เพิ่มใหม่: แยกลอจิก "โหลดข้อมูลสูตรเข้าหน้าเว็บปัจจุบัน" ออกมาเป็นฟังก์ชันกลาง
+// เพื่อให้ทั้งปุ่ม Open (เดิม แต่ตอนนี้ไม่ได้เรียกแล้ว) และระบบเปิดสูตรผ่านลิงก์แท็บใหม่ (?openRecipe=)
+// ใช้โค้ดชุดเดียวกัน ไม่ต้อง copy ซ้ำ
+function applyOpenedRecipe(key, data, label){
+  editingKey = key;
+  checkedResults.clear();
+  currentRecipeTried = !!data.tried;
+  document.getElementById('saveChangesBtn').style.display = 'inline-block';
+  document.getElementById('recipeNameInput').value = label;
+
+  if(document.getElementById('recipeCategory')) {
+    document.getElementById('recipeCategory').value = data.category || 'Chocolate cookies';
+  }
+
+  ingredients = (data.ingredients || []).map(ing => Object.assign({id:uid()}, ing));
+  if(document.getElementById('recipeUrl')) document.getElementById('recipeUrl').value = data.recipeUrl || '';
+  if(data.recipeUrl){ showRecipeUrlAsLink(data.recipeUrl); } else { showRecipeUrlAsInput(); }
+  document.getElementById('pasteBox').value = data.pasteText || '';
+  document.getElementById('notesBox').value = data.notes || '';
+  recipeOvenTempC = (typeof data.ovenTempC === 'number') ? data.ovenTempC : null;
+  scaleMode = 'pct'; scalePct = 100; overrideRowId = null;
+  renderRows(); renderResults();
+  document.getElementById('saveStatus').textContent = `Opened recipe "${label}".`;
+  document.getElementById('saveStatus').className = 'status-msg ok';
+  requestAnimationFrame(autoResizeAllTextareas);
+  if(recipesModalOverlay) recipesModalOverlay.classList.remove('open');
+}
+
+// ★ เพิ่มใหม่: เช็ค URL ว่ามี ?openRecipe=<key> ไหม (มาจากการกดปุ่ม Open ที่เปิดแท็บใหม่)
+// ถ้ามี ให้ดึงข้อมูลสูตรนั้นจาก Firebase มาโหลดเข้าอัตโนมัติทันทีที่หน้าเว็บพร้อม (auth ready)
+async function tryOpenRecipeFromUrl(){
+  try{
+    const params = new URLSearchParams(window.location.search);
+    const key = params.get('openRecipe');
+    if(!key) return;
+    const rawVal = await safeStorage.get(key);
+    if(!rawVal){
+      document.getElementById('saveStatus').textContent = 'ไม่พบสูตรนี้ (อาจถูกลบไปแล้ว)';
+      document.getElementById('saveStatus').className = 'status-msg err';
+      return;
+    }
+    const data = JSON.parse(rawVal);
+    const label = key.replace(/^recipe:/,'').replace(/-\d+$/,'');
+    applyOpenedRecipe(key, data, label);
+  }catch(err){
+    console.error('tryOpenRecipeFromUrl error:', err);
+  }
+}
+
 let allSavedRecipes = []; // cache of all saved recipes, used for live search filtering
 
 async function refreshSavedList(){
@@ -1869,28 +1918,12 @@ function renderRecipeRows(items){
     loadBtn.className = 'btn secondary small'; loadBtn.textContent = 'Open';
     loadBtn.style.marginRight = '6px';
     loadBtn.onclick = () => {
-      editingKey = key;
-      checkedResults.clear();
-      currentRecipeTried = !!data.tried;
-      document.getElementById('saveChangesBtn').style.display = 'inline-block';
-      document.getElementById('recipeNameInput').value = label;
-
-      if(document.getElementById('recipeCategory')) {
-        document.getElementById('recipeCategory').value = data.category || 'Chocolate cookies';
-      }
-
-      ingredients = (data.ingredients || []).map(ing => Object.assign({id:uid()}, ing));
-      if(document.getElementById('recipeUrl')) document.getElementById('recipeUrl').value = data.recipeUrl || '';
-      if(data.recipeUrl){ showRecipeUrlAsLink(data.recipeUrl); } else { showRecipeUrlAsInput(); }
-      document.getElementById('pasteBox').value = data.pasteText || '';
-      document.getElementById('notesBox').value = data.notes || '';
-      recipeOvenTempC = (typeof data.ovenTempC === 'number') ? data.ovenTempC : null;
-      scaleMode = 'pct'; scalePct = 100; overrideRowId = null;
-      renderRows(); renderResults();
-      document.getElementById('saveStatus').textContent = `Opened recipe "${label}".`;
-      document.getElementById('saveStatus').className = 'status-msg ok';
-      requestAnimationFrame(autoResizeAllTextareas);
-      if(recipesModalOverlay) recipesModalOverlay.classList.remove('open');
+      // ★ แก้ไข: เดิมกด Open แล้วโหลดสูตรทับหน้าปัจจุบันไปเลย ทำให้ต้องเสิชใหม่ทุกครั้งถ้าอยากเปิดสูตรอื่นต่อ
+      // ตอนนี้เปลี่ยนเป็นเปิดสูตรนั้นในแท็บใหม่แทน (ผ่าน query param ?openRecipe=<key>)
+      // หน้าต่าง/แท็บเดิมจะยังค้าง list ที่เสิชอยู่ ไม่โดนล้าง กดเปิดสูตรอื่นต่อได้เลยโดยไม่ต้องพิมพ์คำค้นหาใหม่
+      const newTabUrl = new URL(window.location.href);
+      newTabUrl.searchParams.set('openRecipe', key);
+      window.open(newTabUrl.toString(), '_blank');
     };
 
     const delBtn = document.createElement('button');
@@ -1983,10 +2016,10 @@ renderResults();
 updateTotalReadout();
 
 if(typeof window.onAuthReady === 'function'){
-  window.onAuthReady(refreshSavedList);
+  window.onAuthReady(() => { refreshSavedList(); tryOpenRecipeFromUrl(); });
 } else {
   // เผื่อกรณีเบราว์เซอร์เก่าที่โหลด module script ช้าผิดปกติ ใช้ fallback แบบเดิมสำรองไว้
-  setTimeout(() => { refreshSavedList(); }, 1000);
+  setTimeout(() => { refreshSavedList(); tryOpenRecipeFromUrl(); }, 1000);
 }
 </script>
 

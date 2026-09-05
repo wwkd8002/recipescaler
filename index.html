@@ -821,7 +821,15 @@ document.addEventListener('keydown', (e)=>{
 });
 
 function uid(){ return 'r'+Math.random().toString(36).slice(2,9); }
-function isSugarRow(row){ return SUGAR_CATEGORIES.includes(row.category); }
+function isSugarRow(row){
+  if(SUGAR_CATEGORIES.includes(row.category)) return true;
+  // Fallback: catch sugar ingredients regardless of language/category detection —
+  // if the name itself contains "sugar" or the Thai word "น้ำตาล", treat it as sugar.
+  const n = (row.name||'').toLowerCase();
+  if(/\bsugar\b/.test(n)) return true;
+  if((row.name||'').includes('น้ำตาล')) return true;
+  return false;
+}
 function round1(n){ return Math.round(n*10)/10; }
 
 function parseAmount(str) {
@@ -841,6 +849,11 @@ const CATEGORY_RULES = [
   ['icing sugar', 'Powdered sugar'], ['confectioner', 'Powdered sugar'],
   ['granulated sugar', 'Granulated sugar'], ['white sugar', 'Granulated sugar'],
   ['caster sugar', 'Granulated sugar'], ['sugar', 'Granulated sugar'],
+  ['น้ำตาลทรายแดง', 'Brown sugar, packed'], ['น้ำตาลแดง', 'Brown sugar, packed'],
+  ['น้ำตาลปี๊บ', 'Brown sugar, packed'], ['น้ำตาลมะพร้าว', 'Brown sugar, packed'],
+  ['น้ำตาลไอซิ่ง', 'Powdered sugar'], ['น้ำตาลป่น', 'Powdered sugar'],
+  ['น้ำตาลทรายขาว', 'Granulated sugar'], ['น้ำตาลทราย', 'Granulated sugar'],
+  ['น้ำตาล', 'Granulated sugar'],
   ['cake flour', 'Cake flour'], ['bread flour', 'Bread flour'],
   ['all-purpose flour', 'All-purpose flour'], ['all purpose flour', 'All-purpose flour'],
   ['plain flour', 'All-purpose flour'], ['flour', 'All-purpose flour'],
@@ -874,8 +887,17 @@ const CATEGORY_RULES = [
 function detectCategory(name){
   const n = (name||'').toLowerCase();
   for(const [kw, cat] of CATEGORY_RULES){
-    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-    if(new RegExp('\\b'+escaped+'\\b').test(n)) return cat;
+    const isAsciiKeyword = /^[\x00-\x7F]+$/.test(kw);
+    if(isAsciiKeyword){
+      // \b word-boundary matching works for ASCII/English keywords.
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+      if(new RegExp('\\b'+escaped+'\\b').test(n)) return cat;
+    } else {
+      // \b doesn't work on Thai (or other non-ASCII) script since Thai
+      // characters aren't treated as "word" characters by JS regex —
+      // fall back to a plain substring match instead.
+      if(n.includes(kw)) return cat;
+    }
   }
   return null;
 }

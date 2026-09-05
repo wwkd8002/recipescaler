@@ -293,6 +293,7 @@
   .weight-calc .field { display: flex; flex-direction: column; gap: 4px; }
   .weight-calc label { font-size: 12px; color: var(--ink-soft); }
   .weight-calc input { width: 110px; padding: 8px 9px; border: 1px solid var(--paper-line); border-radius: 6px; font-size: 14px; }
+  .weight-calc select { width: 200px; padding: 8px 9px; border: 1px solid var(--paper-line); border-radius: 6px; font-size: 14px; background:#fff; color:var(--ink); font-family: var(--sans); }
   .weight-calc .total-readout { font-family: var(--mono); font-size: 14px; color: var(--ink-soft); }
 
   table { width: 100%; border-collapse: collapse; font-family: var(--sans); }
@@ -700,6 +701,17 @@ box-sizing:border-box;
     </div>
   </div>
 
+  <div class="card">
+    <h2>Calculate from an ingredient amount</h2>
+    <div class="card-note">e.g. the recipe calls for 300 g mashed banana but you only have 200 g? Pick that ingredient, enter what you actually have, and every other ingredient will scale to stay balanced with it.</div>
+    <div class="weight-calc">
+      <div class="field"><label>Ingredient</label><select id="ingAmountSelect"></select></div>
+      <div class="field"><label>Amount you have (g)</label><input type="number" id="ingAmountValue" min="0" step="any" placeholder="e.g. 200"></div>
+      <div class="field"><label>&nbsp;</label><button class="btn" id="applyIngAmountBtn">Apply this scale</button></div>
+    </div>
+    <div class="total-readout" id="ingAmountReadout" style="margin-top:8px;"></div>
+  </div>
+
   </div>
   <div class="results-col">
 
@@ -1056,11 +1068,12 @@ function renderRows(){
       sugarSubRow.style.display = isSugarRow(row) ? 'flex' : 'none';
       renderResults();
     }
-    nameInput.oninput = e=>{ row.name=e.target.value; updateDynamic(); };
+    nameInput.oninput = e=>{ row.name=e.target.value; updateDynamic(); renderIngAmountSelect(); };
     updateDynamic();
 
     box.appendChild(card);
   });
+  renderIngAmountSelect();
 }
 
 function renderPills(){
@@ -1107,6 +1120,68 @@ function GrandmaScale(){
   overrideRowId=null;
   renderResults();
 }
+
+// --- Calculate from an ingredient amount ---
+// Lets the user pick a named ingredient, type how much of it they actually
+// have (in grams), and rescales every other ingredient to keep the same
+// ratio as the original recipe (reuses the same row-override engine that
+// backs the inline "Scaled (g)" inputs in the results table).
+function renderIngAmountSelect(){
+  const sel = document.getElementById('ingAmountSelect');
+  if(!sel) return;
+  const prevValue = sel.value;
+  const namedRows = ingredients.filter(r=>r.name.trim()!=='');
+  sel.innerHTML = '';
+  if(namedRows.length===0){
+    const opt = document.createElement('option');
+    opt.value=''; opt.textContent='(add an ingredient first)';
+    sel.appendChild(opt);
+  } else {
+    namedRows.forEach(row=>{
+      const opt = document.createElement('option');
+      opt.value = row.id;
+      opt.textContent = row.name;
+      sel.appendChild(opt);
+    });
+    if(namedRows.some(r=>r.id===prevValue)) sel.value = prevValue;
+  }
+  updateIngAmountReadout();
+}
+
+function updateIngAmountReadout(){
+  const sel = document.getElementById('ingAmountSelect');
+  const readout = document.getElementById('ingAmountReadout');
+  if(!sel || !readout) return;
+  const row = ingredients.find(r=>r.id===sel.value);
+  if(!row){ readout.textContent=''; return; }
+  const orig = originalGrams(row);
+  if(orig==null){ readout.textContent = `Enter a valid amount/unit for "${row.name}" above first.`; return; }
+  const eff = effectiveOrig(row, orig);
+  readout.textContent = `Recipe currently calls for ${round1(eff)} g of "${row.name}".`;
+}
+
+const ingAmountSelectEl = document.getElementById('ingAmountSelect');
+if(ingAmountSelectEl) ingAmountSelectEl.addEventListener('change', updateIngAmountReadout);
+
+const applyIngAmountBtn = document.getElementById('applyIngAmountBtn');
+if(applyIngAmountBtn) applyIngAmountBtn.addEventListener('click', ()=>{
+  const sel = document.getElementById('ingAmountSelect');
+  const valInput = document.getElementById('ingAmountValue');
+  const readout = document.getElementById('ingAmountReadout');
+  if(!sel || !valInput) return;
+  const rowId = sel.value;
+  const target = parseFloat(valInput.value);
+  const row = ingredients.find(r=>r.id===rowId);
+  if(!row){ return; }
+  if(isNaN(target) || target<=0){ if(readout) readout.textContent = 'Enter how many grams you have.'; return; }
+  const orig = originalGrams(row);
+  if(orig==null){ if(readout) readout.textContent = `Enter a valid amount/unit for "${row.name}" above first.`; return; }
+  overrideRowId = rowId;
+  scaleMode = 'row';
+  rowOverrides[rowId] = target;
+  renderResults();
+  if(readout) readout.textContent = `Scaling the whole recipe so "${row.name}" comes out to ${round1(target)} g.`;
+});
 
 function renderResults(){
   const body = document.getElementById('resultsBody');

@@ -467,6 +467,12 @@ box-sizing:border-box;
   .recent-saved-title{ flex:1; }
   .recent-saved-chevron{ font-size:12px; }
   .recent-saved-body{ padding:0 20px 14px; }
+  .recent-saved-list{
+    max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--paper-line) transparent;
+  }
+  .recent-saved-list::-webkit-scrollbar{ width: 7px; }
+  .recent-saved-list::-webkit-scrollbar-track{ background: transparent; }
+  .recent-saved-list::-webkit-scrollbar-thumb{ background-color: var(--paper-line); border-radius: 10px; }
   .recent-saved-row{
     display:flex; align-items:center; gap:8px; width:100%; padding:8px 0;
     border:none; border-top:1px solid var(--paper-line); background:none; cursor:pointer; text-align:left;

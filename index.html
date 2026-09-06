@@ -1850,7 +1850,7 @@ function renderRecentSavedList(items){
   if(!listEl) return;
   listEl.innerHTML = '';
 
-  const recent = items.slice(0, 10);
+  const recent = items.slice(0, 30);
   if(recent.length === 0){
     listEl.innerHTML = '<div class="recent-saved-empty">No saved recipes yet.</div>';
     return;

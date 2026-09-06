@@ -488,6 +488,19 @@ box-sizing:border-box;
   .recipes-table td.recipe-category-cell{ color:var(--ink-soft); font-size:12.5px; white-space:nowrap; }
   .recipes-table td.recipe-actions-cell{ white-space:nowrap; text-align:right; }
   .recipes-table .recipe-match-hint{ font-size:11px; color:var(--ink-soft); margin-top:2px; }
+  /* ★ เพิ่มใหม่: หัวข้อกลุ่มโฟลเดอร์ (คลิกพับ/ขยายได้) ในมุมมอง Recipes แบบจัดกลุ่ม */
+  .recipes-table tr.folder-header-row td{
+    background:#EFE9DA; cursor:pointer; font-family:var(--sans); font-weight:600;
+    font-size:13px; color:var(--ink); padding:9px 10px; user-select:none;
+  }
+  .recipes-table tr.folder-header-row:hover td{ background:#E8E1CE; }
+  .folder-toggle-icon{ display:inline-block; width:14px; margin-right:4px; color:var(--ink-soft); }
+  .folder-header-label{ margin-right:6px; }
+  .folder-count{ color:var(--ink-soft); font-weight:400; font-size:12px; }
+  .last-opened-badge{
+    display:inline-block; margin-left:8px; font-family:var(--sans); font-size:10.5px; font-weight:600;
+    color:var(--accent-deep); background:#EAF0DD; border-radius:10px; padding:2px 7px; vertical-align:middle;
+  }
   @media (max-width:600px){
     .recipes-modal-overlay{ padding:24px 10px; }
     .recipes-modal{ padding:20px 16px 16px; }
@@ -1751,11 +1764,37 @@ async function tryOpenRecipeFromUrl(){
 
 let allSavedRecipes = []; // cache of all saved recipes, used for live search filtering
 
+// ★ เพิ่มใหม่: สถานะ UI ของหน้า Recipes (พับ/ขยายโฟลเดอร์ไหนบ้าง, เปิดสูตรไหนล่าสุด)
+// เก็บแยกจากข้อมูลสูตร ใช้ path 'meta/...' ใน Firebase คนละ root กับ 'recipe/...' จึงไม่ชนกับ listPrefix()
+const UI_STATE_KEY = 'meta:recipeListUiState';
+let uiListState = { collapsed: {}, lastOpenedKey: null };
+let uiListStateLoaded = false;
+
+async function loadUiListState(){
+  try{
+    const raw = await safeStorage.get(UI_STATE_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      uiListState.collapsed = parsed.collapsed || {};
+      uiListState.lastOpenedKey = parsed.lastOpenedKey || null;
+    }
+  }catch(err){ console.error('Failed to load recipe list UI state:', err); }
+}
+
+async function saveUiListState(){
+  try{ await safeStorage.set(UI_STATE_KEY, JSON.stringify(uiListState)); }
+  catch(err){ console.error('Failed to save recipe list UI state:', err); }
+}
+
 async function refreshSavedList(){
   const listEl = document.getElementById('savedList'); // <tbody> inside the Recipes modal
   if(!listEl) return;
   listEl.innerHTML = '<tr><td colspan="4" class="status-msg" style="text-align:center;padding:18px 0;">Loading...</td></tr>';
   try{
+    if(!uiListStateLoaded){
+      await loadUiListState();
+      uiListStateLoaded = true;
+    }
     const keys = await safeStorage.listPrefix();
     if(keys.length===0){
       allSavedRecipes = [];
@@ -1962,6 +2001,130 @@ function updateResultCount(shown, total){
     : `${shown} of ${total} recipes`;
 }
 
+// ★ แยกการสร้าง <tr> ของสูตรหนึ่งรายการออกมาเป็นฟังก์ชันกลาง ใช้ได้ทั้งมุมมองจัดกลุ่มโฟลเดอร์และมุมมองค้นหาแบบแบน
+// opts.hideCategory: ซ่อนคอลัมน์ 📁 category (ใช้ตอนอยู่ใต้หัวข้อโฟลเดอร์ไปแล้ว ไม่ต้องซ้ำ)
+function buildRecipeRow({key, data, category, label, matchHint}, opts={}){
+  const tr = document.createElement('tr');
+
+  // ★ ช่องติ๊ก "เคยลองทำสูตรนี้แล้ว" — ติ๊กแล้วบันทึกลง cloud ทันที
+  const tdCheck = document.createElement('td');
+  tdCheck.className = 'check-col';
+  const triedCheckbox = document.createElement('input');
+  triedCheckbox.type = 'checkbox';
+  triedCheckbox.className = 'ing-check';
+  triedCheckbox.checked = !!data.tried;
+  triedCheckbox.title = 'เคยลองทำสูตรนี้แล้ว';
+  triedCheckbox.onchange = async () => {
+    data.tried = triedCheckbox.checked;
+    nameCell.classList.toggle('tried-label', triedCheckbox.checked);
+    try{ await safeStorage.set(key, JSON.stringify(data)); }
+    catch(err){ console.error('Failed to save tried status:', err); }
+  };
+  tdCheck.appendChild(triedCheckbox);
+
+  const tdName = document.createElement('td');
+  const nameCell = document.createElement('div');
+  nameCell.textContent = label;
+  if(data.tried) nameCell.classList.add('tried-label');
+  tdName.appendChild(nameCell);
+
+  // ★ เพิ่มใหม่: ป้าย "เปิดล่าสุด" แปะไว้ที่สูตรซึ่งเป็นอันล่าสุดที่กด Open
+  if(uiListState.lastOpenedKey === key){
+    const badge = document.createElement('span');
+    badge.className = 'last-opened-badge';
+    badge.textContent = '🕓 เปิดล่าสุด';
+    nameCell.appendChild(badge);
+  }
+
+  if(matchHint){
+    const hintEl = document.createElement('div');
+    hintEl.className = 'recipe-match-hint';
+    hintEl.textContent = matchHint;
+    tdName.appendChild(hintEl);
+  }
+
+  const tdCategory = document.createElement('td');
+  tdCategory.className = 'recipe-category-cell';
+  tdCategory.textContent = opts.hideCategory ? '' : `📁 ${category}`;
+
+  const tdActions = document.createElement('td');
+  tdActions.className = 'recipe-actions-cell';
+
+  const loadBtn = document.createElement('button');
+  loadBtn.type = 'button';
+  loadBtn.className = 'btn secondary small'; loadBtn.textContent = 'Open';
+  loadBtn.style.marginRight = '6px';
+  loadBtn.onclick = () => {
+    // ★ แก้ไข: เดิมกด Open แล้วโหลดสูตรทับหน้าปัจจุบันไปเลย ทำให้ต้องเสิชใหม่ทุกครั้งถ้าอยากเปิดสูตรอื่นต่อ
+    // ตอนนี้เปลี่ยนเป็นเปิดสูตรนั้นในแท็บใหม่แทน (ผ่าน query param ?openRecipe=<key>)
+    // หน้าต่าง/แท็บเดิมจะยังค้าง list ที่เสิชอยู่ ไม่โดนล้าง กดเปิดสูตรอื่นต่อได้เลยโดยไม่ต้องพิมพ์คำค้นหาใหม่
+    const newTabUrl = new URL(window.location.href);
+    newTabUrl.searchParams.set('openRecipe', key);
+    window.open(newTabUrl.toString(), '_blank');
+
+    // ★ เพิ่มใหม่: จำไว้ว่านี่คือสูตรที่เปิดล่าสุด แล้วรีเฟรชป้ายทันทีโดยไม่ต้องปิดเปิด modal ใหม่
+    uiListState.lastOpenedKey = key;
+    saveUiListState();
+    filterSavedRecipes();
+  };
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'btn danger small'; delBtn.textContent = 'Delete';
+  delBtn.onclick = async () => {
+    if(confirm(`Are you sure you want to delete "${label}"?`)) {
+      await safeStorage.delete(key);
+      refreshSavedList();
+    }
+  };
+
+  tdActions.appendChild(loadBtn);
+  tdActions.appendChild(delBtn);
+
+  tr.appendChild(tdCheck);
+  tr.appendChild(tdName);
+  tr.appendChild(tdCategory);
+  tr.appendChild(tdActions);
+  return tr;
+}
+
+// ★ เพิ่มใหม่: หัวข้อกลุ่มโฟลเดอร์ — คลิกเพื่อพับ/ขยาย สถานะจำไว้ข้าม session ผ่าน uiListState
+function buildFolderHeaderRow(folder, count){
+  const tr = document.createElement('tr');
+  tr.className = 'folder-header-row';
+
+  const td = document.createElement('td');
+  td.colSpan = 4;
+
+  const collapsed = !!uiListState.collapsed[folder];
+
+  const icon = document.createElement('span');
+  icon.className = 'folder-toggle-icon';
+  icon.textContent = collapsed ? '▸' : '▾';
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'folder-header-label';
+  labelEl.textContent = `📁 ${folder}`;
+
+  const countEl = document.createElement('span');
+  countEl.className = 'folder-count';
+  countEl.textContent = `(${count})`;
+
+  td.appendChild(icon);
+  td.appendChild(labelEl);
+  td.appendChild(countEl);
+
+  td.onclick = () => {
+    uiListState.collapsed[folder] = !collapsed;
+    saveUiListState();
+    filterSavedRecipes();
+  };
+
+  tr.appendChild(td);
+  return tr;
+}
+
+// มุมมองค้นหา (แบบเดิม): แสดงเป็น list แบนไม่จัดกลุ่ม เพราะกำลังกรองผลลัพธ์อยู่แล้ว
 function renderRecipeRows(items){
   const listEl = document.getElementById('savedList');
   if(!listEl) return;
@@ -1972,75 +2135,35 @@ function renderRecipeRows(items){
     return;
   }
 
-  items.forEach(({key, data, category, label, matchHint})=>{
-    const tr = document.createElement('tr');
+  items.forEach(item => listEl.appendChild(buildRecipeRow(item)));
+}
 
-    // ★ ช่องติ๊ก "เคยลองทำสูตรนี้แล้ว" — ติ๊กแล้วบันทึกลง cloud ทันที
-    const tdCheck = document.createElement('td');
-    tdCheck.className = 'check-col';
-    const triedCheckbox = document.createElement('input');
-    triedCheckbox.type = 'checkbox';
-    triedCheckbox.className = 'ing-check';
-    triedCheckbox.checked = !!data.tried;
-    triedCheckbox.title = 'เคยลองทำสูตรนี้แล้ว';
-    triedCheckbox.onchange = async () => {
-      data.tried = triedCheckbox.checked;
-      nameCell.classList.toggle('tried-label', triedCheckbox.checked);
-      try{ await safeStorage.set(key, JSON.stringify(data)); }
-      catch(err){ console.error('Failed to save tried status:', err); }
-    };
-    tdCheck.appendChild(triedCheckbox);
+// ★ เพิ่มใหม่: มุมมองปกติ (ไม่ได้ค้นหา) — จัดกลุ่มสูตรตามชื่อโฟลเดอร์ เรียงชื่อโฟลเดอร์ตามตัวอักษร
+function renderRecipeRowsGrouped(items){
+  const listEl = document.getElementById('savedList');
+  if(!listEl) return;
+  listEl.innerHTML = '';
 
-    const tdName = document.createElement('td');
-    const nameCell = document.createElement('div');
-    nameCell.textContent = label;
-    if(data.tried) nameCell.classList.add('tried-label');
-    tdName.appendChild(nameCell);
-    if(matchHint){
-      const hintEl = document.createElement('div');
-      hintEl.className = 'recipe-match-hint';
-      hintEl.textContent = matchHint;
-      tdName.appendChild(hintEl);
+  if(items.length === 0){
+    listEl.innerHTML = '<tr><td colspan="4" class="status-msg" style="text-align:center;padding:18px 0;">No saved recipes yet.</td></tr>';
+    return;
+  }
+
+  const groups = new Map();
+  items.forEach(item => {
+    const folder = item.category;
+    if(!groups.has(folder)) groups.set(folder, []);
+    groups.get(folder).push(item);
+  });
+
+  const folderNames = [...groups.keys()].sort((a,b)=> a.localeCompare(b, undefined, {sensitivity:'base'}));
+
+  folderNames.forEach(folder => {
+    const recipesInFolder = groups.get(folder);
+    listEl.appendChild(buildFolderHeaderRow(folder, recipesInFolder.length));
+    if(!uiListState.collapsed[folder]){
+      recipesInFolder.forEach(item => listEl.appendChild(buildRecipeRow(item, {hideCategory:true})));
     }
-
-    const tdCategory = document.createElement('td');
-    tdCategory.className = 'recipe-category-cell';
-    tdCategory.textContent = `📁 ${category}`;
-
-    const tdActions = document.createElement('td');
-    tdActions.className = 'recipe-actions-cell';
-
-    const loadBtn = document.createElement('button');
-    loadBtn.type = 'button';
-    loadBtn.className = 'btn secondary small'; loadBtn.textContent = 'Open';
-    loadBtn.style.marginRight = '6px';
-    loadBtn.onclick = () => {
-      // ★ แก้ไข: เดิมกด Open แล้วโหลดสูตรทับหน้าปัจจุบันไปเลย ทำให้ต้องเสิชใหม่ทุกครั้งถ้าอยากเปิดสูตรอื่นต่อ
-      // ตอนนี้เปลี่ยนเป็นเปิดสูตรนั้นในแท็บใหม่แทน (ผ่าน query param ?openRecipe=<key>)
-      // หน้าต่าง/แท็บเดิมจะยังค้าง list ที่เสิชอยู่ ไม่โดนล้าง กดเปิดสูตรอื่นต่อได้เลยโดยไม่ต้องพิมพ์คำค้นหาใหม่
-      const newTabUrl = new URL(window.location.href);
-      newTabUrl.searchParams.set('openRecipe', key);
-      window.open(newTabUrl.toString(), '_blank');
-    };
-
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'btn danger small'; delBtn.textContent = 'Delete';
-    delBtn.onclick = async () => {
-      if(confirm(`Are you sure you want to delete "${label}"?`)) {
-        await safeStorage.delete(key);
-        refreshSavedList();
-      }
-    };
-
-    tdActions.appendChild(loadBtn);
-    tdActions.appendChild(delBtn);
-
-    tr.appendChild(tdCheck);
-    tr.appendChild(tdName);
-    tr.appendChild(tdCategory);
-    tr.appendChild(tdActions);
-    listEl.appendChild(tr);
   });
 }
 
@@ -2048,7 +2171,7 @@ function filterSavedRecipes(){
   const q = (document.getElementById('recipeSearch')?.value || '').toLowerCase().trim();
 
   if(q === ''){
-    renderRecipeRows(allSavedRecipes);
+    renderRecipeRowsGrouped(allSavedRecipes);
     updateResultCount(allSavedRecipes.length, allSavedRecipes.length);
     return;
   }

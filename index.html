@@ -454,6 +454,33 @@ box-sizing:border-box;
   .recipes-nav-btn .recipes-nav-icon{ font-size:17px; }
   .recipes-nav-btn .recipes-nav-arrow{ margin-left:auto; color:var(--ink-soft); font-size:16px; }
 
+  /* ★ เพิ่มใหม่: การ์ด "Recently saved" ในไซด์บาร์ — พับ/ขยายได้ */
+  .recent-saved-card{ padding:0; overflow:hidden; }
+  .recent-saved-toggle-btn{
+    width:100%; display:flex; align-items:center; gap:8px;
+    background:none; border:none; padding:16px 20px; cursor:pointer; text-align:left;
+    font-family:var(--sans); font-size:12.5px; text-transform:uppercase; letter-spacing:.1em;
+    font-weight:700; color:var(--ink-soft);
+  }
+  .recent-saved-toggle-btn:hover{ color:var(--ink); }
+  .recent-saved-icon{ font-size:14px; text-transform:none; letter-spacing:0; }
+  .recent-saved-title{ flex:1; }
+  .recent-saved-chevron{ font-size:12px; }
+  .recent-saved-body{ padding:0 20px 14px; }
+  .recent-saved-row{
+    display:flex; align-items:center; gap:8px; width:100%; padding:8px 0;
+    border:none; border-top:1px solid var(--paper-line); background:none; cursor:pointer; text-align:left;
+    font-family:var(--sans);
+  }
+  .recent-saved-row:first-child{ border-top:none; }
+  .recent-saved-row:hover .recent-saved-name{ color:var(--accent-deep); text-decoration:underline; }
+  .recent-saved-name{
+    flex:1; min-width:0; font-size:13px; color:var(--ink);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .recent-saved-time{ font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  .recent-saved-empty{ font-family:var(--sans); font-size:12px; color:var(--ink-soft); padding:6px 0; }
+
   .recipes-modal-overlay{
     position:fixed; inset:0; background:rgba(54,43,34,.45); z-index:900;
     display:none; align-items:flex-start; justify-content:center;
@@ -618,6 +645,17 @@ box-sizing:border-box;
       <button class="btn secondary" id="saveChangesBtn" style="display:none;">💾 Save Changes</button>
     </div>
     <div id="saveStatus" class="status-msg"></div>
+  </div>
+</div>
+
+<div class="card recent-saved-card">
+  <button type="button" id="recentSavedToggleBtn" class="recent-saved-toggle-btn" aria-expanded="false">
+    <span class="recent-saved-icon">🕓</span>
+    <span class="recent-saved-title">Recently saved</span>
+    <span class="recent-saved-chevron" id="recentSavedChevron">▸</span>
+  </button>
+  <div id="recentSavedBody" class="recent-saved-body" style="display:none;">
+    <div id="recentSavedList" class="recent-saved-list"></div>
   </div>
 </div>
 </div>
@@ -1772,7 +1810,7 @@ let lastSavedKey = null; // ★ เพิ่มใหม่: key ของสู
 // ★ เพิ่มใหม่: สถานะ UI ของหน้า Recipes (พับ/ขยายโฟลเดอร์ไหนบ้าง, เปิดสูตรไหนล่าสุด)
 // เก็บแยกจากข้อมูลสูตร ใช้ path 'meta/...' ใน Firebase คนละ root กับ 'recipe/...' จึงไม่ชนกับ listPrefix()
 const UI_STATE_KEY = 'meta:recipeListUiState';
-let uiListState = { collapsed: {}, lastOpenedKey: null };
+let uiListState = { collapsed: {}, lastOpenedKey: null, recentSavedExpanded: false };
 let uiListStateLoaded = false;
 
 async function loadUiListState(){
@@ -1782,6 +1820,7 @@ async function loadUiListState(){
       const parsed = JSON.parse(raw);
       uiListState.collapsed = parsed.collapsed || {};
       uiListState.lastOpenedKey = parsed.lastOpenedKey || null;
+      uiListState.recentSavedExpanded = typeof parsed.recentSavedExpanded === 'boolean' ? parsed.recentSavedExpanded : false;
     }
   }catch(err){ console.error('Failed to load recipe list UI state:', err); }
 }
@@ -1790,6 +1829,77 @@ async function saveUiListState(){
   try{ await safeStorage.set(UI_STATE_KEY, JSON.stringify(uiListState)); }
   catch(err){ console.error('Failed to save recipe list UI state:', err); }
 }
+
+// ★ เพิ่มใหม่: การ์ด "Recently saved" ในไซด์บาร์ — โชว์ 10 สูตรที่เซฟล่าสุด พับ/ขยายได้ จำสถานะไว้
+function formatRelativeTime(iso){
+  if(!iso) return '';
+  const then = new Date(iso).getTime();
+  if(isNaN(then)) return '';
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if(mins < 1) return 'just now';
+  if(mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if(hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if(days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function renderRecentSavedList(items){
+  const listEl = document.getElementById('recentSavedList');
+  if(!listEl) return;
+  listEl.innerHTML = '';
+
+  const recent = items.slice(0, 10);
+  if(recent.length === 0){
+    listEl.innerHTML = '<div class="recent-saved-empty">No saved recipes yet.</div>';
+    return;
+  }
+
+  recent.forEach(item => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'recent-saved-row';
+
+    const name = document.createElement('span');
+    name.className = 'recent-saved-name';
+    name.textContent = item.label;
+
+    const time = document.createElement('span');
+    time.className = 'recent-saved-time';
+    time.textContent = formatRelativeTime(item.data.savedAt);
+
+    row.appendChild(name);
+    row.appendChild(time);
+
+    row.onclick = () => {
+      uiListState.lastOpenedKey = item.key;
+      saveUiListState();
+      const newTabUrl = new URL(window.location.href);
+      newTabUrl.searchParams.set('openRecipe', item.key);
+      window.open(newTabUrl.toString(), '_blank');
+    };
+
+    listEl.appendChild(row);
+  });
+}
+
+function applyRecentSavedExpandState(){
+  const body = document.getElementById('recentSavedBody');
+  const chevron = document.getElementById('recentSavedChevron');
+  const btn = document.getElementById('recentSavedToggleBtn');
+  if(!body || !chevron || !btn) return;
+  const expanded = !!uiListState.recentSavedExpanded;
+  body.style.display = expanded ? 'block' : 'none';
+  chevron.textContent = expanded ? '▾' : '▸';
+  btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
+document.getElementById('recentSavedToggleBtn')?.addEventListener('click', () => {
+  uiListState.recentSavedExpanded = !uiListState.recentSavedExpanded;
+  applyRecentSavedExpandState();
+  saveUiListState();
+});
 
 async function refreshSavedList(){
   const listEl = document.getElementById('savedList'); // <tbody> inside the Recipes modal
@@ -1800,9 +1910,12 @@ async function refreshSavedList(){
       await loadUiListState();
       uiListStateLoaded = true;
     }
+    applyRecentSavedExpandState();
     const keys = await safeStorage.listPrefix();
     if(keys.length===0){
       allSavedRecipes = [];
+      lastSavedKey = null;
+      renderRecentSavedList([]);
       listEl.innerHTML = '<tr><td colspan="4" class="status-msg" style="text-align:center;padding:18px 0;">No saved recipes yet.</td></tr>';
       updateResultCount(0, 0);
       return;
@@ -1831,6 +1944,7 @@ async function refreshSavedList(){
     lastSavedKey = (items.length && items[0].data.savedAt) ? items[0].key : null;
 
     allSavedRecipes = items;
+    renderRecentSavedList(items);
 
     // อัปเดต dropdown แนะนำหมวดหมู่ (Category) จากรายการสูตรทั้งหมด
     const datalist = document.getElementById('categorySuggestions');

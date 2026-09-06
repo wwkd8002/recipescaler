@@ -501,6 +501,10 @@ box-sizing:border-box;
     display:inline-block; margin-left:8px; font-family:var(--sans); font-size:10.5px; font-weight:600;
     color:var(--accent-deep); background:#EAF0DD; border-radius:10px; padding:2px 7px; vertical-align:middle;
   }
+  .last-saved-badge{
+    display:inline-block; margin-left:8px; font-family:var(--sans); font-size:10.5px; font-weight:600;
+    color:#8A6318; background:#FBF0DA; border-radius:10px; padding:2px 7px; vertical-align:middle;
+  }
   @media (max-width:600px){
     .recipes-modal-overlay{ padding:24px 10px; }
     .recipes-modal{ padding:20px 16px 16px; }
@@ -1763,6 +1767,7 @@ async function tryOpenRecipeFromUrl(){
 }
 
 let allSavedRecipes = []; // cache of all saved recipes, used for live search filtering
+let lastSavedKey = null; // ★ เพิ่มใหม่: key ของสูตรที่ถูกเซฟ(หรือแก้ไข)ล่าสุด คำนวณจาก savedAt ทุกครั้งที่ refreshSavedList — ไม่ต้องเก็บแยกที่ไหน
 
 // ★ เพิ่มใหม่: สถานะ UI ของหน้า Recipes (พับ/ขยายโฟลเดอร์ไหนบ้าง, เปิดสูตรไหนล่าสุด)
 // เก็บแยกจากข้อมูลสูตร ใช้ path 'meta/...' ใน Firebase คนละ root กับ 'recipe/...' จึงไม่ชนกับ listPrefix()
@@ -1821,6 +1826,9 @@ async function refreshSavedList(){
       const tb = b.data.savedAt ? new Date(b.data.savedAt).getTime() : 0;
       return tb - ta;
     });
+
+    // ★ เพิ่มใหม่: สูตรที่ถูกเซฟล่าสุด (มี savedAt มากที่สุด) หลังเรียงแล้วคือตัวแรกนี่เอง
+    lastSavedKey = (items.length && items[0].data.savedAt) ? items[0].key : null;
 
     allSavedRecipes = items;
 
@@ -2034,6 +2042,13 @@ function buildRecipeRow({key, data, category, label, matchHint}, opts={}){
     badge.className = 'last-opened-badge';
     badge.textContent = '🕓 เปิดล่าสุด';
     nameCell.appendChild(badge);
+  }
+  // ★ เพิ่มใหม่: ป้าย "เซฟล่าสุด" แปะไว้ที่สูตรซึ่งมี savedAt ล่าสุด (คำนวณอัตโนมัติ ไม่ต้องกดอะไรเพิ่ม)
+  if(lastSavedKey === key){
+    const savedBadge = document.createElement('span');
+    savedBadge.className = 'last-saved-badge';
+    savedBadge.textContent = '💾 เซฟล่าสุด';
+    nameCell.appendChild(savedBadge);
   }
 
   if(matchHint){

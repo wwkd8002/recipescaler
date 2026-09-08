@@ -486,6 +486,19 @@ box-sizing:border-box;
   }
   .recent-saved-time{ font-size:11px; color:var(--ink-soft); white-space:nowrap; }
   .recent-saved-empty{ font-family:var(--sans); font-size:12px; color:var(--ink-soft); padding:6px 0; }
+  /* ★ เพิ่มใหม่: หัวข้อกลุ่มเดือนใน Recently saved — พับ/ขยายได้ทีละเดือน */
+  .recent-saved-month-header{
+    display:flex; align-items:center; gap:6px; width:100%;
+    background:none; border:none; cursor:pointer; text-align:left;
+    padding:8px 2px 6px; font-family:var(--sans); font-size:12px; font-weight:600;
+    color:var(--ink-soft); border-top:1px solid var(--paper-line);
+  }
+  .recent-saved-month-header:first-child{ border-top:none; }
+  .recent-saved-month-header:hover{ color:var(--ink); }
+  .recent-saved-month-icon{ font-size:10px; }
+  .recent-saved-month-label{ flex:1; }
+  .recent-saved-month-count{ font-size:11px; color:var(--ink-soft); }
+  .recent-saved-month-rows{ display:flex; flex-direction:column; }
 
   .recipes-modal-overlay{
     position:fixed; inset:0; background:rgba(54,43,34,.45); z-index:900;
@@ -1851,42 +1864,112 @@ function formatRelativeTime(iso){
   return new Date(iso).toLocaleDateString();
 }
 
+// ★ เพิ่มใหม่: หาชื่อเดือนสำหรับจัดกลุ่ม เช่น "September 2026" (ใช้ locale เดียวกับ formatRelativeTime)
+function monthGroupInfo(iso){
+  const d = iso ? new Date(iso) : null;
+  if(!d || isNaN(d.getTime())){
+    return { key: 'unknown', label: 'Undated' };
+  }
+  const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const label = d.toLocaleDateString(undefined, { month:'long', year:'numeric' });
+  return { key, label };
+}
+
+function buildRecentSavedRow(item){
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'recent-saved-row';
+
+  const name = document.createElement('span');
+  name.className = 'recent-saved-name';
+  name.textContent = item.label;
+
+  const time = document.createElement('span');
+  time.className = 'recent-saved-time';
+  time.textContent = formatRelativeTime(item.data.savedAt);
+
+  row.appendChild(name);
+  row.appendChild(time);
+
+  row.onclick = () => {
+    uiListState.lastOpenedKey = item.key;
+    saveUiListState();
+    const newTabUrl = new URL(window.location.href);
+    newTabUrl.searchParams.set('openRecipe', item.key);
+    window.open(newTabUrl.toString(), '_blank');
+  };
+
+  return row;
+}
+
+// ★ แก้ไข: โชว์ได้ถึง 200 สูตรล่าสุด จัดกลุ่มตามเดือนที่เซฟ พับ/ขยายได้ทีละเดือน (เดือนล่าสุดเปิดไว้ให้อัตโนมัติ)
 function renderRecentSavedList(items){
   const listEl = document.getElementById('recentSavedList');
   if(!listEl) return;
   listEl.innerHTML = '';
 
-  const recent = items.slice(0, 30);
+  const recent = items.slice(0, 200);
   if(recent.length === 0){
     listEl.innerHTML = '<div class="recent-saved-empty">No saved recipes yet.</div>';
     return;
   }
 
+  // จัดกลุ่มตามเดือน โดยคงลำดับเดิม (ล่าสุดก่อน) ไว้ภายในแต่ละกลุ่ม
+  const groups = [];
+  const groupByKey = {};
   recent.forEach(item => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'recent-saved-row';
+    const { key, label } = monthGroupInfo(item.data.savedAt);
+    if(!groupByKey[key]){
+      const g = { key, label, items: [] };
+      groupByKey[key] = g;
+      groups.push(g);
+    }
+    groupByKey[key].items.push(item);
+  });
 
-    const name = document.createElement('span');
-    name.className = 'recent-saved-name';
-    name.textContent = item.label;
+  groups.forEach((group, idx) => {
+    const stateKey = `month:${group.key}`;
+    // เดือนแรก (ล่าสุด) เปิดไว้ให้โดยอัตโนมัติถ้ายังไม่เคยตั้งค่าไว้ก่อน
+    if(!(stateKey in uiListState.collapsed)){
+      uiListState.collapsed[stateKey] = idx !== 0;
+    }
+    const collapsed = !!uiListState.collapsed[stateKey];
 
-    const time = document.createElement('span');
-    time.className = 'recent-saved-time';
-    time.textContent = formatRelativeTime(item.data.savedAt);
+    const header = document.createElement('button');
+    header.type = 'button';
+    header.className = 'recent-saved-month-header';
 
-    row.appendChild(name);
-    row.appendChild(time);
+    const icon = document.createElement('span');
+    icon.className = 'recent-saved-month-icon';
+    icon.textContent = collapsed ? '▸' : '▾';
 
-    row.onclick = () => {
-      uiListState.lastOpenedKey = item.key;
+    const label = document.createElement('span');
+    label.className = 'recent-saved-month-label';
+    label.textContent = group.label;
+
+    const count = document.createElement('span');
+    count.className = 'recent-saved-month-count';
+    count.textContent = `(${group.items.length})`;
+
+    header.appendChild(icon);
+    header.appendChild(label);
+    header.appendChild(count);
+
+    const rowsWrap = document.createElement('div');
+    rowsWrap.className = 'recent-saved-month-rows';
+    rowsWrap.style.display = collapsed ? 'none' : 'flex';
+    group.items.forEach(item => rowsWrap.appendChild(buildRecentSavedRow(item)));
+
+    header.onclick = () => {
+      const nowCollapsed = !uiListState.collapsed[stateKey];
+      uiListState.collapsed[stateKey] = nowCollapsed;
       saveUiListState();
-      const newTabUrl = new URL(window.location.href);
-      newTabUrl.searchParams.set('openRecipe', item.key);
-      window.open(newTabUrl.toString(), '_blank');
+      icon.textContent = nowCollapsed ? '▸' : '▾';
+      rowsWrap.style.display = nowCollapsed ? 'none' : 'flex';
     };
 
-    listEl.appendChild(row);
+    listEl.appendChild(header);
+    listEl.appendChild(rowsWrap);
   });
 }
 

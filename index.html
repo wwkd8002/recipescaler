@@ -689,7 +689,7 @@ box-sizing:border-box;
       <button type="button" id="closeRecipesModalBtn" class="recipes-modal-close" aria-label="Close">✕</button>
     </div>
     <div class="search-wrap">
-      <input id="recipeSearch" class="saved-search" type="text" placeholder="🔍 Search recipe or ingredient...">
+      <input id="recipeSearch" class="saved-search" type="text" placeholder="🔍 Search recipe or ingredient... (หลายคำคั่นด้วย , เช่น peanut butter, yogurt)">
       <button type="button" id="recipeSearchClearBtn" class="search-clear-btn" aria-label="ล้างคำค้นหา">✕</button>
     </div>
     <div id="recipesResultCount" class="recipes-result-count"></div>
@@ -2386,9 +2386,19 @@ function renderRecipeRowsGrouped(items){
 }
 
 function filterSavedRecipes(){
-  const q = (document.getElementById('recipeSearch')?.value || '').toLowerCase().trim();
+  const raw = (document.getElementById('recipeSearch')?.value || '').toLowerCase().trim();
 
-  if(q === ''){
+  if(raw === ''){
+    renderRecipeRowsGrouped(allSavedRecipes);
+    updateResultCount(allSavedRecipes.length, allSavedRecipes.length);
+    return;
+  }
+
+  // ★ แก้ไข: ค้นหาหลายคำได้ — คั่นด้วย , หรือ + หรือ ; (เช่น "peanut butter, yogurt")
+  // สูตรต้องมีครบทุกคำถึงจะแสดง (แต่ละคำเจอที่ชื่อ/หมวด/วัตถุดิบ/ลิงก์ ตรงไหนก็ได้)
+  // ถ้าไม่ได้พิมพ์ตัวคั่น จะค้นเป็นวลีเดียวเหมือนเดิม (เช่น "peanut butter" = วัตถุดิบชื่อนี้)
+  const terms = raw.split(/[,+;]/).map(t=>t.trim()).filter(t=>t!=='');
+  if(terms.length === 0){
     renderRecipeRowsGrouped(allSavedRecipes);
     updateResultCount(allSavedRecipes.length, allSavedRecipes.length);
     return;
@@ -2396,17 +2406,41 @@ function filterSavedRecipes(){
 
   const filtered = [];
   allSavedRecipes.forEach(item => {
-    const nameMatches = item.label.toLowerCase().includes(q);
-    const categoryMatches = item.category.toLowerCase().includes(q);
+    const labelL = item.label.toLowerCase();
+    const categoryL = item.category.toLowerCase();
+    const urlL = (item.data.recipeUrl || '').toLowerCase();
     const ingredientNames = (item.data.ingredients || []).map(ing => ing && ing.name ? ing.name.toLowerCase() : '');
-    const matchedIngredient = ingredientNames.find(n => n.includes(q));
-    const urlMatches = (item.data.recipeUrl || '').toLowerCase().includes(q);
 
-    if(nameMatches || categoryMatches || matchedIngredient || urlMatches){
+    let allMatch = true;
+    const ingHits = [];      // วัตถุดิบที่เจอ (สำหรับโชว์ hint)
+    let urlHit = false;
+    let anyOnlyIngredient = false;
+
+    for(const q of terms){
+      const nameMatches = labelL.includes(q);
+      const categoryMatches = categoryL.includes(q);
+      const matchedIngredient = ingredientNames.find(n => n.includes(q));
+      const urlMatches = urlL.includes(q);
+
+      if(!(nameMatches || categoryMatches || matchedIngredient || urlMatches)){
+        allMatch = false;
+        break;
+      }
+      if(!nameMatches && !categoryMatches){
+        if(matchedIngredient){
+          if(!ingHits.includes(matchedIngredient)) ingHits.push(matchedIngredient);
+          anyOnlyIngredient = true;
+        } else if(urlMatches){
+          urlHit = true;
+        }
+      }
+    }
+
+    if(allMatch){
       let matchHint = null;
-      if(!nameMatches && !categoryMatches && matchedIngredient){
-        matchHint = `🔎 มีวัตถุดิบ: ${matchedIngredient}`;
-      } else if(!nameMatches && !categoryMatches && urlMatches){
+      if(ingHits.length > 0){
+        matchHint = `🔎 มีวัตถุดิบ: ${ingHits.join(' + ')}`;
+      } else if(urlHit){
         matchHint = `🔎 มีในลิงก์: ${item.data.recipeUrl}`;
       }
       filtered.push(Object.assign({}, item, {matchHint}));
